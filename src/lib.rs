@@ -2,7 +2,9 @@ pub mod error;
 
 use std::io::Write;
 use std::ops::Deref;
+use std::str::FromStr;
 
+use crate::error::PortAdaptorError;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Slot;
 use anchor_lang::solana_program::instruction::Instruction;
@@ -16,17 +18,35 @@ use port_staking_instructions::instruction::{
     withdraw as port_staking_withdraw,
 };
 use port_staking_instructions::state::{StakeAccount, StakingPool};
-use port_variable_rate_lending_instructions::id as port_lending_id;
-use port_variable_rate_lending_instructions::instruction::{borrow_obligation_liquidity, deposit_reserve_liquidity_and_obligation_collateral, redeem_reserve_collateral, refresh_obligation, refresh_reserve, repay_obligation_liquidity, withdraw_obligation_collateral, LendingInstruction, deposit_reserve_liquidity};
-use port_variable_rate_lending_instructions::state::{CollateralExchangeRate, LendingMarket, Obligation, Reserve};
-use crate::error::PortAdaptorError;
+use port_variable_rate_lending_instructions::instruction::{
+    borrow_obligation_liquidity, deposit_reserve_liquidity,
+    deposit_reserve_liquidity_and_obligation_collateral, redeem_reserve_collateral,
+    refresh_obligation, refresh_reserve, repay_obligation_liquidity,
+    withdraw_obligation_collateral, LendingInstruction,
+};
+use port_variable_rate_lending_instructions::state::{
+    CollateralExchangeRate, LendingMarket, Obligation, Reserve,
+};
 
+pub enum Cluster {
+    Mainnet,
+    Devnet,
+}
+
+// TODO repeat for staking program if needed
+pub fn get_lending_program_id(cluster: Cluster) -> Pubkey {
+    match cluster {
+        Cluster::Mainnet => port_variable_rate_lending_instructions::id(),
+        Cluster::Devnet => Pubkey::from_str("pdQ2rQQU5zH2rDgZ7xH2azMBJegUzUyunJ5Jd637hC4").unwrap(),
+    }
+}
 
 pub fn init_obligation<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, InitObligation<'info>>,
+    cluster: Cluster,
 ) -> ProgramResult {
     let ix = Instruction {
-        program_id: port_lending_id(),
+        program_id: get_lending_program_id(cluster),
         accounts: vec![
             AccountMeta::new(ctx.accounts.obligation.key(), false),
             AccountMeta::new_readonly(ctx.accounts.lending_market.key(), false),
@@ -65,10 +85,11 @@ pub struct InitObligation<'info> {
 
 pub fn deposit_reserve<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, Deposit<'info>>,
+    cluster: Cluster,
     amount: u64,
 ) -> ProgramResult {
     let ix = deposit_reserve_liquidity(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         amount,
         ctx.accounts.source_liquidity.key(),
         ctx.accounts.destination_collateral.key(),
@@ -114,10 +135,11 @@ pub struct Deposit<'info> {
 
 pub fn deposit_and_collateralize<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, DepositAndCollateralize<'info>>,
+    cluster: Cluster,
     amount: u64,
 ) -> ProgramResult {
     let ix = deposit_reserve_liquidity_and_obligation_collateral(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         amount,
         ctx.accounts.source_liquidity.key(),
         ctx.accounts.user_collateral.key(),
@@ -180,10 +202,11 @@ pub struct DepositAndCollateralize<'info> {
 
 pub fn borrow<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, Borrow<'info>>,
+    cluster: Cluster,
     amount: u64,
 ) -> ProgramResult {
     let ix = borrow_obligation_liquidity(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         amount,
         ctx.accounts.source_liquidity.key(),
         ctx.accounts.destination_liquidity.key(),
@@ -229,10 +252,11 @@ pub struct Borrow<'info> {
 
 pub fn repay<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, Repay<'info>>,
+    cluster: Cluster,
     amount: u64,
 ) -> ProgramResult {
     let ix = repay_obligation_liquidity(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         amount,
         ctx.accounts.source_liquidity.key(),
         ctx.accounts.destination_liquidity.key(),
@@ -273,10 +297,11 @@ pub struct Repay<'info> {
 
 pub fn withdraw<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, Withdraw<'info>>,
+    cluster: Cluster,
     amount: u64,
 ) -> ProgramResult {
     let ix = withdraw_obligation_collateral(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         amount,
         ctx.accounts.source_collateral.key(),
         ctx.accounts.destination_collateral.key(),
@@ -327,10 +352,11 @@ pub struct Withdraw<'info> {
 
 pub fn redeem<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, Redeem<'info>>,
+    cluster: Cluster,
     amount: u64,
 ) -> ProgramResult {
     let ix = redeem_reserve_collateral(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         amount,
         ctx.accounts.source_collateral.key(),
         ctx.accounts.destination_liquidity.key(),
@@ -376,10 +402,11 @@ pub struct Redeem<'info> {
 
 pub fn refresh_port_reserve<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, RefreshReserve<'info>>,
+    cluster: Cluster,
 ) -> ProgramResult {
     let oracle = ctx.remaining_accounts;
     let ix = refresh_reserve(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         ctx.accounts.reserve.key(),
         oracle
             .first()
@@ -398,10 +425,11 @@ pub struct RefreshReserve<'info> {
 
 pub fn refresh_port_obligation<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, RefreshObligation<'info>>,
+    cluster: Cluster,
 ) -> ProgramResult {
     let reserves = ctx.remaining_accounts;
     let ix = refresh_obligation(
-        port_variable_rate_lending_instructions::id(),
+        get_lending_program_id(cluster),
         ctx.accounts.obligation.key(),
         reserves.iter().map(|info| info.key()).collect(),
     );
@@ -419,9 +447,10 @@ pub struct RefreshObligation<'info> {
 
 pub fn claim_reward<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, ClaimReward<'info>>,
+    cluster: Cluster,
 ) -> ProgramResult {
     let ix = port_claim_reward(
-        port_staking_instructions::id(),
+        get_lending_program_id(cluster),
         ctx.accounts.stake_account_owner.key(),
         ctx.accounts.stake_account.key(),
         ctx.accounts.staking_pool.key(),
@@ -460,12 +489,13 @@ pub struct ClaimReward<'info> {
 
 pub fn create_port_staking_pool<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, CreateStakingPoolContext<'info>>,
+    cluster: Cluster,
     supply: u64,
     duration: u64,
     earliest_reward_claim_time: Slot,
 ) -> ProgramResult {
     let ix = init_port_staking_pool(
-        port_staking_instructions::id(),
+        get_lending_program_id(cluster),
         supply,
         duration,
         earliest_reward_claim_time,
@@ -511,9 +541,10 @@ pub struct CreateStakingPoolContext<'info> {
 
 pub fn create_stake_account<'a, 'b, 'c, 'info>(
     ctx: CpiContext<'a, 'b, 'c, 'info, CreateStakeAccount<'info>>,
+    cluster: Cluster,
 ) -> ProgramResult {
     let ix = create_port_stake_account(
-        port_staking_instructions::id(),
+        get_lending_program_id(cluster),
         ctx.accounts.stake_account.key(),
         ctx.accounts.staking_pool.key(),
         ctx.accounts.owner.key(),
@@ -838,7 +869,7 @@ impl anchor_lang::AccountSerialize for PortReserve {
 
 impl anchor_lang::Owner for PortReserve {
     fn owner() -> Pubkey {
-        port_variable_rate_lending_instructions::id()
+        get_lending_program_id(Cluster::Devnet)
     }
 }
 
@@ -850,13 +881,16 @@ impl Deref for PortReserve {
     }
 }
 
-
 #[derive(Clone)]
 pub struct PortObligation(Obligation);
 
 impl PortObligation {
     pub const LEN: usize = Obligation::LEN;
-    pub fn calculate_liquidity(&self, reserve_pubkey: &Pubkey, exchange_rate: CollateralExchangeRate) -> Result<u64, ProgramError> {
+    pub fn calculate_liquidity(
+        &self,
+        reserve_pubkey: &Pubkey,
+        exchange_rate: CollateralExchangeRate,
+    ) -> Result<u64, ProgramError> {
         let borrow = self
             .borrows
             .iter()
@@ -877,9 +911,13 @@ impl PortObligation {
                 } else {
                     None
                 }
-            }).unwrap_or(0);
+            })
+            .unwrap_or(0);
 
-        exchange_rate.collateral_to_liquidity(deposit)?.checked_sub(borrow.try_ceil_u64()?).ok_or(PortAdaptorError::Insolvency.into())
+        exchange_rate
+            .collateral_to_liquidity(deposit)?
+            .checked_sub(borrow.try_ceil_u64()?)
+            .ok_or(PortAdaptorError::Insolvency.into())
     }
 }
 
@@ -902,7 +940,7 @@ impl anchor_lang::AccountSerialize for PortObligation {
 
 impl anchor_lang::Owner for PortObligation {
     fn owner() -> Pubkey {
-        port_variable_rate_lending_instructions::id()
+        get_lending_program_id(Cluster::Devnet)
     }
 }
 
@@ -913,8 +951,6 @@ impl Deref for PortObligation {
         &self.0
     }
 }
-
-
 
 #[derive(Clone)]
 pub struct PortStakingPool(StakingPool);
@@ -954,7 +990,6 @@ impl Deref for PortStakingPool {
     }
 }
 
-
 #[derive(Clone)]
 pub struct PortLendingMarket(LendingMarket);
 
@@ -981,7 +1016,8 @@ impl anchor_lang::AccountSerialize for PortLendingMarket {
 
 impl anchor_lang::Owner for PortLendingMarket {
     fn owner() -> Pubkey {
-        port_variable_rate_lending_instructions::id()
+        //port_variable_rate_lending_instructions::id()
+        get_lending_program_id(Cluster::Devnet)
     }
 }
 
@@ -992,4 +1028,3 @@ impl Deref for PortLendingMarket {
         &self.0
     }
 }
-
